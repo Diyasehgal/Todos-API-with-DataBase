@@ -1,93 +1,84 @@
 const express = require('express');
-const sqlite3 = require('sqlite3').verbose();
 const app = express();
 const port = 3000;
 
 // Middleware to parse JSON bodies
 app.use(express.json());
 
-// Initialize SQLite database
-const db = new sqlite3.Database('./todos.db', (err) => {
-  if (err) {
-    console.error('Error opening database:', err.message);
-  } else {
-    console.log('Connected to SQLite database.');
-  }
-});
+// Sample data to simulate initial to-do list items
+let todos = [
+  { id: 1, task: "Learn Node.js", completed: false, priority: "medium" },
+  { id: 2, task: "Build a REST API", completed: false, priority: "medium" }
+];
 
+// Helper function to find a to-do by ID
+const findTodoById = (id) => todos.find(todo => todo.id === id);
 
-db.run(`
-  CREATE TABLE IF NOT EXISTS todos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    task TEXT NOT NULL,
-    completed BOOLEAN NOT NULL DEFAULT 0,
-    priority TEXT NOT NULL DEFAULT 'medium'
-  );
-`);
-
-// POST /todos - Add a new to-do item with priority
-app.post('/todos', (req, res) => {
-  const { task, priority = 'medium' } = req.body;
-
-  if (!task) {
-    return res.status(400).json({ error: 'Task is required' });
-  }
-
-  const query = `INSERT INTO todos (task, completed, priority) VALUES (?, 0, ?)`;
-  db.run(query, [task, priority], function(err) {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    res.status(201).json({ id: this.lastID, task, completed: false, priority });
-  });
-});
-
-// GET /todos - Retrieve all to-do items
+// GET /todos - Retrieves all to-do items, with optional completed status filter
 app.get('/todos', (req, res) => {
-  db.all('SELECT * FROM todos', [], (err, rows) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    res.json(rows);
-  });
-});
-
-// PUT /todos/:id - Update an existing to-do item
-app.put('/todos/:id', (req, res) => {
-  const { task, completed, priority } = req.body;
-  const id = req.params.id;
-
-  const query = `
-    UPDATE todos SET
-      task = COALESCE(?, task),
-      completed = COALESCE(?, completed),
-      priority = COALESCE(?, priority)
-    WHERE id = ?`;
+  const { completed } = req.query;
   
-  db.run(query, [task, completed, priority, id], function(err) {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    if (this.changes === 0) {
-      return res.status(404).json({ error: 'To-Do item not found' });
-    }
-    res.json({ id, task, completed, priority });
-  });
+  // Filters todos based on completed status if specified in the query parameter
+  if (completed !== undefined) {
+    const isCompleted = completed === 'true';
+    return res.json(todos.filter(todo => todo.completed === isCompleted));
+  }
+  
+  res.json(todos); // Return all todos if no filter is provided
 });
 
-// DELETE /todos/:id - Delete a to-do item
-app.delete('/todos/:id', (req, res) => {
-  const id = req.params.id;
+// POST /todos - Adds a new to-do item with a priority field
+app.post('/todos', (req, res) => {
+  const { task, priority = "medium" } = req.body;
+  if (!task) {
+    return res.status(400).send("Task is required");
+  }
+  const newTodo = {
+    id: todos.length + 1,
+    task,
+    completed: false,
+    priority
+  };
 
-  db.run('DELETE FROM todos WHERE id = ?', id, function(err) {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    if (this.changes === 0) {
-      return res.status(404).json({ error: 'To-Do item not found' });
-    }
-    res.status(204).send();
-  });
+  todos.push(newTodo);
+  res.status(201).json(newTodo); // Respond with the created to-do item
+});
+
+// PUT /todos/complete-all - Marks all to-do items as completed
+app.put('/todos/complete-all', (req, res) => {
+  todos = todos.map(todo => ({ ...todo, completed: true }));
+  res.json({ message: "All to-do items marked as completed", todos });
+});
+
+// PUT /todos/:id - Updates an existing to-do item by its ID
+app.put('/todos/:id', (req, res) => {
+  const { id } = req.params;
+  const todo = findTodoById(parseInt(id));
+  
+  if (!todo) {
+    return res.status(404).send("To-Do item not found");
+  }
+  
+  // Destructure and update task, completed status, and priority
+  const { task, completed, priority } = req.body;
+  if (task) todo.task = task;
+  if (completed !== undefined) todo.completed = completed;
+  if (priority) todo.priority = priority;
+
+  res.json(todo);
+});
+
+// DELETE /todos/:id - Deletes a to-do item by its ID
+app.delete('/todos/:id', (req, res) => {
+  const { id } = req.params;
+  const index = todos.findIndex(todo => todo.id === parseInt(id));
+
+  if (index === -1) {
+    return res.status(404).send("To-Do item not found");
+  }
+
+  todos.splice(index, 1);
+  res.status(204).send(); // No content response after deletion
 });
 
 // Start the server
